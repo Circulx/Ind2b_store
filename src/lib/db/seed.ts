@@ -11,7 +11,7 @@ import type { Order, Product, Store } from "../types";
  * Demo sign-ins (shown on the sign-in pages in development):
  *   Store owner      priya@example.in  /  Demo@1234         /login        (owns Priya Handlooms and Shreeji Steel Tubes)
  *   Platform admin   neha@ind2b.com    /  Admin@1234        /admin/login
- *   Super admin      root@ind2b.com    /  Super@Admin2026   /admin/login  (complete control)
+ *   Super admin      root@ind2b.com    /  Super@Admin2026   /superadmin/login  (complete control; /admin/login also works)
  *   Shopper          meera@example.in  /  Shop@1234         Priya Handlooms → /account/login
  * Never enable demo data in production: create the real super admin with SUPERADMIN_EMAIL /
  * SUPERADMIN_PASSWORD (see src/lib/db/bootstrap.ts) or `npm run superadmin`.

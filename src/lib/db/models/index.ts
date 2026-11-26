@@ -145,9 +145,12 @@ export const AppReviewModel = (mongoose.models.AppReview as Model<AppReviewDoc> 
   new Schema<AppReviewDoc>({ _id: String, status: String, note: String, updatedAt: { type: Date, default: () => new Date() } }, opts));
 
 export type AuditDoc = { at: Date; actorId: string; actorName: string; action: string; target: string; detail?: unknown };
-export const AuditLogModel = (mongoose.models.AuditLog as Model<AuditDoc> | undefined) ?? mongoose.model<AuditDoc>("AuditLog", new Schema<AuditDoc>({
+const AuditLogSchema = new Schema<AuditDoc>({
   at: { type: Date, default: () => new Date() }, actorId: String, actorName: String, action: String, target: String, detail: Schema.Types.Mixed,
-}, opts));
+}, opts);
+AuditLogSchema.index({ at: -1 });                  // the audit pages and CSV export always read newest first
+AuditLogSchema.index({ actorId: 1, at: -1 });
+export const AuditLogModel = (mongoose.models.AuditLog as Model<AuditDoc> | undefined) ?? mongoose.model<AuditDoc>("AuditLog", AuditLogSchema);
 
 export type SubscriberDoc = { storeId: string; email: string; createdAt: Date };
 const SubscriberSchema = new Schema<SubscriberDoc>({

@@ -8,7 +8,7 @@
  *
  * Needs MONGODB_URI (shell, .env.local or .env). The password must have 12+ characters
  * with upper and lower case letters, a digit and a symbol. Every session of the account
- * is ended, so the change applies at the next sign-in at /admin/login.
+ * is ended, so the change applies at the next sign-in at /superadmin/login (or /admin/login).
  */
 import readline from "node:readline/promises";
 import { Writable } from "node:stream";
@@ -53,7 +53,7 @@ const existing = await users.findOne({ email });
 if (!existing) {
   const _id = `usr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   await users.insertOne({ _id, email, name: name || "Super Admin", phone: "", passwordHash: hash, role: "superadmin", status: "active", createdAt: new Date() });
-  console.log(`Created super admin ${email} (${_id}). Sign in at /admin/login.`);
+  console.log(`Created super admin ${email} (${_id}). Sign in at /superadmin/login.`);
 } else {
   if (existing.role === "merchant" && (await db.collection("stores").findOne({ ownerId: existing._id }))) {
     console.error(`${email} is a merchant who owns stores. Use a different email for the super admin.`);
@@ -61,7 +61,7 @@ if (!existing) {
   }
   await users.updateOne({ _id: existing._id }, { $set: { role: "superadmin", status: "active", passwordHash: hash, passwordChangedAt: new Date(), ...(name ? { name } : {}) } });
   await db.collection("sessions").deleteMany({ userId: existing._id });
-  console.log(`${email} is now a super admin with the new password. Existing sessions were ended. Sign in at /admin/login.`);
+  console.log(`${email} is now a super admin with the new password. Existing sessions were ended. Sign in at /superadmin/login.`);
 }
 await db.collection("auditlogs").insertOne({ at: new Date(), actorId: "cli", actorName: "npm run superadmin", action: "user.superadmin_cli", target: existing?._id ?? email });
 await mongoose.disconnect();

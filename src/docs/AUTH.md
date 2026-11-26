@@ -4,12 +4,14 @@
 
 | Who | Signs in at | Role | Can do |
 |---|---|---|---|
-| Super admin | `/admin/login` | `superadmin` | Everything admins can, plus **Users & staff** (create staff, change roles, disable/enable any account, sign anyone out, set passwords), **Shopper accounts** (all stores), **Audit log**, change any store's plan |
+| Super admin | `/superadmin/login` → control centre `/superadmin` (`/admin/login` also works and opens the classic admin) | `superadmin` | Everything admins can, plus **Users & staff** (create staff, change roles, disable/enable any account, sign anyone out, set passwords), **Shopper accounts** (all stores), **Audit log**, change any store's plan |
 | Admin | `/admin/login` | `admin` | Overview, stores (suspend/restore), KYC, templates, plugin review, plans (read-only) |
 | Merchant | `/login` | `merchant` | `/dashboard` (unchanged) |
 | Shopper | `<store>/account/login` | per-store account | Own orders, details, password; checkout is pre-filled |
 
-Staff cannot sign in on `/login`, and merchants cannot sign in on `/admin/login`.
+Staff cannot sign in on `/login`, merchants cannot sign in on `/admin/login` or `/superadmin/login`, and admins cannot sign in on `/superadmin/login`.
+
+Check all of this against a running server with `npm run verify:access` (route matrix for anonymous / merchant / admin / super admin, revoked, disabled, forged and idle sessions, the three sign-in forms, rate limiting and sign-out).
 
 ## How the tokens work (JWT)
 

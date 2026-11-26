@@ -10,6 +10,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "superadmin": "node src/scripts/create-superadmin.mjs",
+    "verify:access": "node src/scripts/verify-access.mjs",
     "email:test": "node src/scripts/test-email.mjs",
     "db:reset": "node src/scripts/reset-db.mjs",
     "db:migrate-local": "node src/scripts/migrate-local-data.mjs"

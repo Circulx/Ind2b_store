@@ -34,6 +34,16 @@ src/lib/db/catalog.ts now only holds the DEFAULT templates, plugins and plans. T
 `apps` and `plans` the first time they are needed (only missing entries; saved changes are never overwritten),
 and every page reads them from MongoDB. A store keeps its own copy of its theme in `stores`.
 
+## MongoDB for development
+Use an Atlas cluster, or run MongoDB in Docker (bound to this computer only; data survives restarts in the `ind2b-mongo-data` volume):
+
+```bash
+docker run -d --name ind2b-mongo -p 127.0.0.1:27017:27017 -v ind2b-mongo-data:/data/db --restart unless-stopped mongo:7
+# .env.local
+MONGODB_URI=mongodb://127.0.0.1:27017/ind2b
+```
+With `SEED_DEMO_DATA=true` (the development default) an EMPTY database gets the demo accounts listed in AUTH.md. To start over: `npm run db:reset`.
+
 ## Data saved on this computer by older versions
 Earlier versions of `npm run dev` started a private MongoDB in `./.mongo-data` when they could not read
 `MONGODB_URI` (for example a `.env.local` saved with a byte-order mark, or a line starting with `export`), and
