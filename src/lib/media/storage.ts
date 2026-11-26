@@ -1,0 +1,131 @@
+import "server-only";
+import { createHash, randomBytes } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import mongoose from "mongoose";
+import { connectDb } from "../db/connect";
+import { env, mediaProvider } from "../config/env";
+import { MediaModel } from "../db/models";
+
+/**
+ * Where image files live.
+ *   cloudinary — when CLOUDINARY_URL (or CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET) is set. Required in production:
+ *                global CDN, automatic WebP/AVIF per browser, on-the-fly resizing.
+ *   mongodb    — when Cloudinary is not configured: the image bytes are stored in the same MongoDB
+ *                database (GridFS bucket "media") and served by /media/... Works with any number of
+ *                app servers, nothing is written to the server's disk.
+ *   local      — legacy only: files written to UPLOAD_DIR by earlier versions. They are copied into MongoDB the
+ *                first time they are requested (and all at once by `npm run db:migrate-local`); nothing is
+ *                ever written to the server's disk.
+ * The API secret never leaves the server: uploads are signed here and sent from here.
+ */
+
+export type Stored = { provider: "cloudinary" | "mongodb" | "local"; key: string; url: string };
+const KEY_RE = /^[a-z0-9_-]{1,64}\/[a-z0-9]{24}\.webp$/;
+
+export const localDir = () => path.resolve(/* turbopackIgnore: true */ process.cwd(), env().UPLOAD_DIR);
+export const isValidLocalKey = (key: string) => KEY_RE.test(key);
+
+function cloudinarySign(params: Record<string, string>) {
+  const e = env();
+  const base = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join("&");
+  return createHash("sha1").update(base + e.CLOUDINARY_API_SECRET).digest("hex");
+}
+
+export async function storeImage(storeId: string, data: Buffer): Promise<Stored> {
+  const name = randomBytes(12).toString("hex");
+  if (!/^[a-z0-9_-]{1,64}$/.test(storeId)) throw new Error("invalid_store_id");
+
+  if (mediaProvider() === "cloudinary") {
+    const e = env();
+    const params = { folder: `${e.CLOUDINARY_FOLDER}/${storeId}`, public_id: name, timestamp: String(Math.floor(Date.now() / 1000)) };
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(data)], { type: "image/webp" }), `${name}.webp`);
+    for (const [k, v] of Object.entries(params)) form.append(k, v);
+    form.append("api_key", e.CLOUDINARY_API_KEY!);
+    form.append("signature", cloudinarySign(params));
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${e.CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error(`[cloudinary] upload failed (${res.status}): ${detail.slice(0, 300)}`);   // 401 = wrong key/secret, 400 = bad parameters
+      throw new Error(`cloudinary_upload_failed:${res.status}`);
+    }
+    const json = (await res.json()) as { secure_url: string; public_id: string };
+    // f_auto,q_auto: Cloudinary serves WebP/AVIF per browser at a sensible quality.
+    return { provider: "cloudinary", key: json.public_id, url: json.secure_url.replace("/image/upload/", "/image/upload/f_auto,q_auto/") };
+  }
+
+  const key = `${storeId}/${name}.webp`;
+  await writeToBucket(key, storeId, data);
+  return { provider: "mongodb", key, url: `/media/${key}` };
+}
+
+async function writeToBucket(key: string, storeId: string, data: Buffer) {
+  const bucket = await mediaBucket();
+  await new Promise<void>((resolve, reject) => {
+    const up = bucket.openUploadStream(key, { metadata: { storeId, contentType: "image/webp" } });
+    up.on("error", reject);
+    up.on("finish", () => resolve());
+    up.end(data);
+  });
+}
+
+/** GridFS bucket holding image files when Cloudinary is not configured. */
+async function mediaBucket() {
+  const m = await connectDb();
+  return new mongoose.mongo.GridFSBucket(m.connection.db!, { bucketName: "media" });
+}
+
+/**
+ * Image bytes for /media/<key>, from MongoDB. An image that an older version saved in the legacy
+ * upload folder is copied into MongoDB on first request (and its media record switched to "mongodb"),
+ * so from then on it is served from the database like every other image.
+ */
+export async function readStoredImage(key: string): Promise<Buffer | null> {
+  if (!isValidLocalKey(key)) return null;
+  const bucket = await mediaBucket();
+  const [file] = await bucket.find({ filename: key }).limit(1).toArray();
+  if (file) {
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      bucket.openDownloadStream(file._id).on("data", (c: Buffer) => chunks.push(c)).on("error", reject).on("end", () => resolve());
+    });
+    return Buffer.concat(chunks);
+  }
+  const root = localDir();
+  const legacy = path.resolve(root, key);
+  if (!legacy.startsWith(root + path.sep)) return null;
+  const data = await fs.readFile(legacy).catch(() => null);
+  if (!data) return null;
+  try {
+    if (!(await bucket.find({ filename: key }).limit(1).toArray()).length) await writeToBucket(key, key.split("/")[0]!, data);
+    await MediaModel.updateMany({ key, provider: "local" }, { $set: { provider: "mongodb" } });
+  } catch (e) {
+    console.error("[media] could not copy a legacy image into MongoDB:", key, e);
+  }
+  return data;
+}
+
+export async function removeImage(stored: { provider: "cloudinary" | "mongodb" | "local"; key: string }) {
+  if (stored.provider === "cloudinary") {
+    const e = env();
+    if (!e.CLOUDINARY_CLOUD_NAME) return;
+    const params = { invalidate: "true", public_id: stored.key, timestamp: String(Math.floor(Date.now() / 1000)) };
+    const form = new FormData();
+    for (const [k, v] of Object.entries(params)) form.append(k, v);
+    form.append("api_key", e.CLOUDINARY_API_KEY!);
+    form.append("signature", cloudinarySign(params));
+    await fetch(`https://api.cloudinary.com/v1_1/${e.CLOUDINARY_CLOUD_NAME}/image/destroy`, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) }).catch(() => {});
+    return;
+  }
+  if (!isValidLocalKey(stored.key)) return;
+  // "mongodb", and "local" images that may already have been copied into MongoDB.
+  const bucket = await mediaBucket();
+  for (const f of await bucket.find({ filename: stored.key }).toArray()) await bucket.delete(f._id).catch(() => {});
+  if (stored.provider === "local") await fs.rm(path.join(localDir(), stored.key), { force: true }).catch(() => {});
+}
+
+/** Cloudinary URLs can be resized on the fly; MongoDB-stored files are already at most 2000 px. */
+export function sizedUrl(url: string, width: number) {
+  return url.includes("res.cloudinary.com/") ? url.replace("/image/upload/f_auto,q_auto/", `/image/upload/f_auto,q_auto,c_limit,w_${width}/`) : url;
+}

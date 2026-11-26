@@ -1,0 +1,28 @@
+# Runs IND2B with its own MongoDB on one server:   docker compose up -d --build
+# Needs a .env file next to this one with at least: MONGO_ROOT_PASSWORD, MONGO_APP_PASSWORD, SESSION_SECRET,
+# ROOT_DOMAIN, APP_URL, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD (and the EMAIL_* settings). See .env.example.
+# Use only letters and digits in MONGO_APP_PASSWORD (it is placed inside the connection string).
+# (Using MongoDB Atlas instead? Remove the "mongo" service and set MONGODB_URI to your Atlas string.)
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}
+    volumes:
+      - mongo-data:/data/db
+      - ./src/scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: [mongo]
+    ports: ["3000:3000"]
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://ind2b_app:${MONGO_APP_PASSWORD}@mongo:27017/ind2b?authSource=ind2b
+
+volumes:
+  mongo-data:
